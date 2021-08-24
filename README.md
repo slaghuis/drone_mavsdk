@@ -20,8 +20,8 @@ eric@simulator:~/ros_ws$ ros2 node info /drone_node
     /drone_node/list_parameters: rcl_interfaces/srv/ListParameters
     /drone_node/set_parameters: rcl_interfaces/srv/SetParameters
     /drone_node/set_parameters_atomically: rcl_interfaces/srv/SetParametersAtomically
-  Service Clients:
-
+  Service Clients:  
+  
   Action Servers:
     /drone/land: drone_interfaces/action/Land
     /drone/takeoff: drone_interfaces/action/Takeoff
