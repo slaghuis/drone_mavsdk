@@ -7,6 +7,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
+#include "tf2/LinearMath/Quaternion.h"
+#include "tf2_ros/transform_broadcaster.h"
 
 // MAVSDK Sepecific
 #include <mavsdk/mavsdk.h>
@@ -24,6 +26,9 @@
 #include "std_msgs/msg/string.hpp"
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+
+
 
 #include "drone_mavsdk/visibility_control.h"
 
@@ -82,6 +87,10 @@ public:
     using namespace std::chrono_literals;
     odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 10);
     
+    // TF2 Broadcaster
+    tf_broadcaster_ =
+      std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+    
     // Give the node a second to start up before initiating
     one_off_timer_ = this->create_wall_timer(1000ms, std::bind(&DroneNode::init, this)); 
 
@@ -109,6 +118,9 @@ public:
   // Subscriptions
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr subscription_;
   void cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPtr msg) const;
+  
+  // TF2 Boradcaster
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
   // Action Servers
   rclcpp_action::Server<Takeoff>::SharedPtr takeoff_action_server_; 
@@ -162,10 +174,10 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
   
   }
       
-  // Receive meaages in ROS base_link FLU ; X->Foreward, Y->Left Z->Up
+  // Receive messages in ROS base_link FLU ; X->Foreward, Y->Left Z->Up
   // Send to PX4 in FRD : X->Foreward, Y->Rightl Z->Down.
       
-  RCLCPP_INFO(this->get_logger(), "I heard: foreward = '%f' right = '%f'", msg->linear.x, msg->linear.y);
+  RCLCPP_DEBUG(this->get_logger(), "I heard: foreward = '%f' right = '%f'", msg->linear.x, msg->linear.y);
      
   mavsdk::Offboard::VelocityBodyYawspeed px4_vel_frd{};
   px4_vel_frd.forward_m_s = msg->linear.x;
@@ -416,7 +428,7 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
 
 // Land Action Server End
 
-// Services /////////////////////////////////////////////////////////////////////
+// Simple Services /////////////////////////////////////////////////////////////////////
 
 void DroneNode::arm(const std::shared_ptr<drone_interfaces::srv::Arm::Request> request,
                std::shared_ptr<drone_interfaces::srv::Arm::Response> response) {
@@ -503,11 +515,35 @@ void DroneNode::init()
       
       // We read maxsdk::Telemetry::Odometry in he FRD frame.  This is called "odom"
       // ROS works in the FLU orientation.  Implimented as "base_link"
-      // Publish a static transform broadcaset in your launch file to roll the odom PI radians (180 degrees) from odom to base_link
+      // Publish a transform broadcast to roll the odom PI radians (180 degrees) and update the position from odom to base_link
       
+          
+      rclcpp::Time now = this->get_clock()->now();
+          
+      // Publish transform odom->base_link    
+      geometry_msgs::msg::TransformStamped t;
+      
+      t.header.stamp = now;
+      t.header.frame_id = "odom";
+      t.child_frame_id = "base_link";
+          
+      t.transform.translation.x = odometry.position_body.x_m;
+      t.transform.translation.y = -odometry.position_body.y_m;  // Turn Left into right
+      t.transform.translation.z = -odometry.position_body.z_m;  // Turn down into up
+         
+      //tf2::Quaternion q;
+      //q.setRPY(3.1415, 0, 0);
+      // Adopt the roll pitch and yaw from the drone.
+      t.transform.rotation.x = odometry.q.x;
+      t.transform.rotation.y = odometry.q.y;
+      t.transform.rotation.z = odometry.q.z;
+      t.transform.rotation.w = odometry.q.x;
+      tf_broadcaster_->sendTransform(t);
+          
+      // Publish odometry    
       auto message = nav_msgs::msg::Odometry();
 
-      message.header.stamp = rclcpp::Node::now();//timestamp_.load();
+      message.header.stamp = now;
       message.header.frame_id ="odom";
 
       message.pose.pose.position.x = odometry.position_body.x_m;
