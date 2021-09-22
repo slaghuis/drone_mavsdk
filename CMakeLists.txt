@@ -19,6 +19,8 @@ find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(MAVSDK REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 add_library(base_node_lib SHARED
   src/drone_node.cpp)
@@ -34,7 +36,9 @@ ament_target_dependencies(base_node_lib
   "rclcpp_components"
   "std_msgs"
   "nav_msgs"
-  "geometry_msgs")
+  "geometry_msgs"
+  "tf2"
+  "tf2_ros")
 rclcpp_components_register_node(base_node_lib PLUGIN "drone_node::DroneNode" EXECUTABLE drone_node)
 
 target_link_libraries(base_node_lib
