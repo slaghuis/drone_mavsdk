@@ -10,8 +10,11 @@ xxx@simulator:~/ros_ws$ ros2 node info /drone_node
 /drone_node
   Subscribers:
     /drone/cmd_vel: geometry_msgs/msg/Twist
+    /vl53l1x/range: sensor_msgs/msg/Range
   Publishers:
+    /drone/battery: sensor_msgs/msg/BatteryState
     /drone/odom: nav_msgs/msg/Odometry
+    /tf: tf2_msgs/msg/TFMessage
   Service Servers:
     /drone/arm: drone_interfaces/srv/Arm
     /drone/offboard: drone_interfaces/srv/Offboard
