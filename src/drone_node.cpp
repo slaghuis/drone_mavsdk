@@ -3,6 +3,7 @@
 #include <memory>
 #include <thread>
 #include <string>
+#include <utility>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -12,9 +13,11 @@
 
 // MAVSDK Sepecific
 #include <mavsdk/mavsdk.h>
+#include <mavsdk/plugins/info/info.h>
 #include <mavsdk/plugins/action/action.h>
 #include <mavsdk/plugins/offboard/offboard.h>
 #include <mavsdk/plugins/telemetry/telemetry.h>
+#include <mavsdk/plugins/mavlink_passthrough/mavlink_passthrough.h>
 
 // From drone_interfaces
 #include "drone_interfaces/action/takeoff.hpp"
@@ -27,8 +30,8 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
-
-
+#include <sensor_msgs/msg/battery_state.hpp>
+#include <sensor_msgs/msg/range.hpp>
 
 #include "drone_mavsdk/visibility_control.h"
 
@@ -82,10 +85,14 @@ public:
     // Subscribers
     subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
       "drone/cmd_vel", 10, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
+    
+    height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
+      "vl53l1x/range", 5, std::bind(&DroneNode::height_callback, this, _1));
 
     // Publishers
     using namespace std::chrono_literals;
     odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 10);
+    battery_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("drone/battery", 5);
     
     // TF2 Broadcaster
     tf_broadcaster_ =
@@ -103,7 +110,9 @@ public:
   std::shared_ptr<mavsdk::Telemetry> _telemetry;
   std::shared_ptr<mavsdk::Action> _action;
   std::shared_ptr<mavsdk::Offboard> _offboard;
-    
+  std::shared_ptr<mavsdk::MavlinkPassthrough> _passthrough;
+  std::shared_ptr<mavsdk::Info> _info; 
+      
   ConnectionResult connection_result = ConnectionResult::SystemNotConnected;
   
   // ROS2 Parameters
@@ -114,10 +123,14 @@ public:
   
   // Publishers
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
-
+  rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_publisher_;
+  
   // Subscriptions
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr subscription_;
   void cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPtr msg) const;
+  
+  rclcpp::Subscription<sensor_msgs::msg::Range>::SharedPtr height_subscription_;
+  void height_callback(const sensor_msgs::msg::Range::SharedPtr msg) const;
   
   // TF2 Boradcaster
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -189,7 +202,39 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
   _offboard->set_velocity_body(px4_vel_frd);
 
 }
-
+  
+void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) const
+{
+  
+  // Read the system boot time
+  std::pair< mavsdk::Info::Result, mavsdk::Info::FlightInfo > information = _info->get_flight_information();
+  //information.second.boot_time_ms;
+  
+  // Pass the height to the flight controller to ease landing  
+  mavlink_message_t message;
+  float quaternion = 0.0;
+  mavlink_msg_distance_sensor_pack(
+    _passthrough->get_our_sysid(),                         // ID of this system
+    _passthrough->get_our_compid(),                        // ID of this component (e.g. 200 for IMU)
+    &message,                                              // The MAVLINK message to compress the data into   
+    information.second.time_boot_ms,                       // [ms] Time since system boot
+    msg->min_range * 100,                                  // [cm] Minimum distance sensor can measure.  ROS message is in Meters!      
+    msg->max_range * 100,                                  // [cm] Maximum distance sensor can measure.  ROS message is in Meters!
+    msg->range * 100,                                      // [cm] Current distance reading.  ROS message is in Meters!
+    MAV_DISTANCE_SENSOR::MAV_DISTANCE_SENSOR_INFRARED,     // Type of distance sensor. This is not aligned with msg->radiation_type,
+    0,                                                     // Onboard ID of sensor     
+    MAV_SENSOR_ORIENTATION::MAV_SENSOR_ROTATION_PITCH_270, // Direction the sensor faces
+    255,                                                   // [cm^2] Measurement Variance.  Mx Standard Deviation is 6cm, UINT8_MAX is unknown 
+    msg->field_of_view,                                    // [rad] Horizontal field of view
+    msg->field_of_view,                                    // [rad] Vertical field of view
+    &quaternion,                                           // This field is required if orientation is set to MAV_SENSOR_ROTATION_CUSTOM.  Set to 0 if invalid)
+    0                                                      // Signal quality.  0 = unknown. 1 = invalid signal, 100 = perfect signal
+  ); 
+  
+  _passthrough->send_message(message);
+  
+  
+}
 
 // Action Servers /////////////////////////////////////////////////////////////////
 // Takeoff Action Server - Start
@@ -503,6 +548,8 @@ void DroneNode::init()
   _action = std::make_shared<mavsdk::Action>(target_system);
   _offboard = std::make_shared<mavsdk::Offboard>(target_system);
   _telemetry = std::make_shared<mavsdk::Telemetry>(target_system);
+  _passthrough = std::make_shared<mavsdk::MavlinkPassthrough>(target_system);
+  _info = std::make_shared<mavsdk::Info>(target_system);
 
   while (!_telemetry->health_all_ok()) {
     RCLCPP_INFO(this->get_logger(), "Waiting for system to be ready");
@@ -580,6 +627,32 @@ void DroneNode::init()
       odom_publisher_->publish(message); 
         
    });  
+  
+  _telemetry->subscribe_battery(
+        [this](mavsdk::Telemetry::Battery battery) {
+          
+    rclcpp::Time now = this->get_clock()->now();
+    
+    auto message = sensor_msgs::msg::BatteryState();
+       
+    message.header.stamp = now;
+    message.header.frame_id ="battery";
+          
+    message.voltage = battery.voltage_v;
+    message.temperature = std::numeric_limits<float>::quiet_NaN(); // declared in  <limits>  
+    message.current = std::numeric_limits<float>::quiet_NaN();
+    message.charge = std::numeric_limits<float>::quiet_NaN();
+    message.capacity = std::numeric_limits<float>::quiet_NaN(); 
+    message.design_capacity = std::numeric_limits<float>::quiet_NaN();
+    message.percentage = battery.remaining_percent;          
+    message.present = true;
+    message.power_supply_status = sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_UNKNOWN;
+    message.power_supply_health = sensor_msgs::msg::BatteryState::POWER_SUPPLY_HEALTH_UNKNOWN;
+    message.power_supply_technology = sensor_msgs::msg::BatteryState::POWER_SUPPLY_TECHNOLOGY_UNKNOWN;
+          
+    battery_publisher_->publish(message);
+          
+  });        
 
 }
 
