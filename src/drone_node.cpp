@@ -320,7 +320,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
       current_altitude = (float)position.relative_altitude_m;      
       // Publish feedback      
       goal_handle->publish_feedback(feedback);
-      RCLCPP_INFO(this->get_logger(), "Current Altitude: %f", current_altitude);
+      RCLCPP_DEBUG(this->get_logger(), "Current Altitude: %f", current_altitude);
     });
        
     // Check if armed, else arm
@@ -436,7 +436,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
       current_altitude = (float)position.relative_altitude_m;      
       // Publish feedback      
       goal_handle->publish_feedback(feedback);
-      RCLCPP_INFO(this->get_logger(), "Current Altitude: %f", position.relative_altitude_m);
+      RCLCPP_DEBUG(this->get_logger(), "Current Altitude: %f", position.relative_altitude_m);
     });
 
     const Action::Result land_result = _action->land();
@@ -742,6 +742,8 @@ void DroneNode::init()
     }
     
   });
+  
+  RCLCPP_INFO(this->get_logger(), "Node is ready");
 }
   
 void DroneNode::wait_until_discover()
