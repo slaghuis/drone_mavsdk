@@ -13,6 +13,7 @@
 
 // MAVSDK Sepecific
 #include <mavsdk/mavsdk.h>
+#include <mavsdk/geometry.h>
 #include <mavsdk/plugins/info/info.h>
 #include <mavsdk/plugins/action/action.h>
 #include <mavsdk/plugins/offboard/offboard.h>
@@ -32,6 +33,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <sensor_msgs/msg/battery_state.hpp>
 #include <sensor_msgs/msg/range.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 
 #include "drone_mavsdk/visibility_control.h"
 
@@ -59,6 +61,9 @@ public:
   {
     
     using namespace std::placeholders;
+    
+    _have_global_origin = false;
+          
     // Services
     arm_service_ = this->create_service<drone_interfaces::srv::Arm>("drone/arm", 
       std::bind(&DroneNode::arm, this, _1, _2));
@@ -92,7 +97,8 @@ public:
     // Publishers
     using namespace std::chrono_literals;
     odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 10);
-    battery_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("drone/battery", 5);
+    battery_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("drone/battery", 5);    
+    nav_sat_publisher_ = this->create_publisher<sensor_msgs::msg::NavSatFix>("drone/gps", 10);
     
     // TF2 Broadcaster
     tf_broadcaster_ =
@@ -112,8 +118,13 @@ public:
   std::shared_ptr<mavsdk::Offboard> _offboard;
   std::shared_ptr<mavsdk::MavlinkPassthrough> _passthrough;
   std::shared_ptr<mavsdk::Info> _info; 
-      
+  
+  std::shared_ptr<mavsdk::geometry::CoordinateTransformation> _coordinate_transformation;
+  
+  // Global Variables
+  bool _have_global_origin;
   ConnectionResult connection_result = ConnectionResult::SystemNotConnected;
+  float _last_x, _last_y, _last_z;
   
   // ROS2 Parameters
   std::string connection_url;
@@ -124,6 +135,7 @@ public:
   // Publishers
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr battery_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::NavSatFix>::SharedPtr nav_sat_publisher_;
   
   // Subscriptions
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr subscription_;
@@ -206,9 +218,8 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
 void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) const
 {
   
-  // Read the system boot time
+  // Read the system boot time.  (Is this a hack?)
   std::pair< mavsdk::Info::Result, mavsdk::Info::FlightInfo > information = _info->get_flight_information();
-  //information.second.boot_time_ms;
   
   // Pass the height to the flight controller to ease landing  
   mavlink_message_t message;
@@ -525,7 +536,7 @@ void DroneNode::init()
   this->one_off_timer_->cancel();
   
   // Connect to the flight controller and set up the interfaces for the rest to work.
-    _mavsdk = std::make_shared<mavsdk::Mavsdk>();
+  _mavsdk = std::make_shared<mavsdk::Mavsdk>();
 
   Mavsdk::Configuration config( Mavsdk::Configuration::UsageType::CompanionComputer);
   _mavsdk->set_configuration(config);
@@ -562,8 +573,11 @@ void DroneNode::init()
       
       // We read maxsdk::Telemetry::Odometry in he FRD frame.  This is called "odom"
       // ROS works in the FLU orientation.  Implimented as "base_link"
-      // Publish a transform broadcast to roll the odom PI radians (180 degrees) and update the position from odom to base_link
+      // Publish a transform broadcast to roll the odom PI radians (180 degrees) and update the position from odom to base_link      
       
+      _last_x = odometry.position_body.x_m;
+      _last_y = -odometry.position_body.y_m;  // Turn Left into right
+      _last_z = -odometry.position_body.z_m;  // Turn down into up
           
       rclcpp::Time now = this->get_clock()->now();
           
@@ -652,10 +666,84 @@ void DroneNode::init()
           
     battery_publisher_->publish(message);
           
-  });        
+  });     
+  
+  // Obtain the GPS cooridnates where the estimator has been initialised (map frame [0;0;0])
+  // What if I never obtain a fix?  Then I will keep in publishing a zero transform?
+  _telemetry->get_gps_global_origin_async(
+        [this](mavsdk::Telemetry::Result res, 
+               mavsdk::Telemetry::GpsGlobalOrigin origin) {
+          
+    if(res == mavsdk::Telemetry::Result::Success) {      
+      // Setup a projection reference      
+      mavsdk::geometry::CoordinateTransformation::GlobalCoordinate global_coordinate;
+      global_coordinate.latitude_deg = origin.latitude_deg;
+      global_coordinate.longitude_deg = origin.longitude_deg;
+      _coordinate_transformation = std::make_shared<mavsdk::geometry::CoordinateTransformation>(global_coordinate); 
+      
+      _have_global_origin = true;          
+    }  
+          
+  });
 
+  // Use the _global_origin as reference and calculate where we are in the map frame. This shouls give 
+  // a good map->odom frame transformation
+  _telemetry->subscribe_position([this](Telemetry::Position position) {
+      // std::cout << "Vehicle is at: " << position.latitude_deg << ", " << position.longitude_deg
+      //            << " degrees\n";
+    
+    // Publish the gps position as drone/gps_position of type sensor_msgs/mag/NavSatFix
+    rclcpp::Time now = this->get_clock()->now();
+    
+    auto message = sensor_msgs::msg::NavSatFix();       
+    message.header.stamp = now;
+    message.header.frame_id ="world";
+    message.status.status = sensor_msgs::msg::NavSatStatus::STATUS_FIX;
+    message.status.service = sensor_msgs::msg::NavSatStatus::SERVICE_GPS; 
+    message.latitude = position.latitude_deg;
+    message.longitude = position.longitude_deg;
+    message.altitude = position.absolute_altitude_m;   // Above MSL    
+    nav_sat_publisher_->publish(message);        
+    // message.position_covariance[0] = 0.0;  // Leave blank
+    message.position_covariance_type = sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_UNKNOWN;          
+
+    if (_have_global_origin) {
+        
+      // Transform current position
+      mavsdk::geometry::CoordinateTransformation::GlobalCoordinate global_coordinate;
+      global_coordinate.latitude_deg = position.latitude_deg;
+      global_coordinate.longitude_deg = position.longitude_deg;
+      auto local = _coordinate_transformation->local_from_global(global_coordinate);
+        
+      // Publish a map-> odom transform based on the calculated position relative to odometry
+      // SHOULD this be done by listening to a transform?  Is there a better way.  What if this is old?
+      
+      float err_x = _last_x - local.north_m;
+      float err_y = _last_y - local.east_m;
+      float err_z = _last_z - position.relative_altitude_m;
+      RCLCPP_DEBUG(this->get_logger(), "Publishing transform from map->odom [%.2f;%.2f;%.2f]", err_x, err_y, err_z);
+              
+      //Publish a transform.   
+      geometry_msgs::msg::TransformStamped t;
+      
+      t.header.stamp = now;
+      t.header.frame_id = "map";
+      t.child_frame_id = "odom";
+          
+      t.transform.translation.x = err_x;  
+      t.transform.translation.y = err_y;  // TEST well, is NED map frames handled correctly???
+      t.transform.translation.z = err_z;  
+         
+      t.transform.rotation.x = 0;
+      t.transform.rotation.y = 0;
+      t.transform.rotation.z = 0;
+      t.transform.rotation.w = 1;
+      tf_broadcaster_->sendTransform(t);
+    }
+    
+  });
 }
-
+  
 void DroneNode::wait_until_discover()
 {
     RCLCPP_INFO(this->get_logger(), "Waiting to discover system...");
