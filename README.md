@@ -2,7 +2,7 @@
 Base controller, exposing ROS2 interface to MAVSDK to control drone in local flight.  This node depends on the [drone_interfaces package](https://github.com/slaghuis/drone_interfaces).
 
 ## Coordinate Systems
-PX4 uses a Foreward Right Down coordinate system, and ROS2 uses a Foreward Left Up coodinate system.  A transform broadcaster is included to publish a suitible transform from odom->base_link.
+PX4 uses a Foreward Right Down coordinate system, and ROS2 uses a Foreward Left Up coodinate system.  A transform broadcaster is included to publish a suitible transform from odom->base_link. A second transform is published from map->odom to correct for any deviations as a result of wind, or other odometry faults.  This transform relies on the GPS.
 
 # node info
 ```
@@ -13,6 +13,7 @@ xxx@simulator:~/ros_ws$ ros2 node info /drone_node
     /vl53l1x/range: sensor_msgs/msg/Range
   Publishers:
     /drone/battery: sensor_msgs/msg/BatteryState
+    /drone/gps: sensor_msgs/msg/NavSatFix
     /drone/odom: nav_msgs/msg/Odometry
     /tf: tf2_msgs/msg/TFMessage
   Service Servers:
