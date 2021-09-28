@@ -1,8 +1,8 @@
-# drone_mavsdk
-Base controller, exposing ROS2 interface to MAVSDK to control drone in local flight.  This node depends on the [drone_interfaces package](https://github.com/slaghuis/drone_interfaces).
+# Drone MAVSDK
+Base controller, exposing a ROS2 interface to MAVSDK to control drone in local flight.  This node depends on the [drone_interfaces package](https://github.com/slaghuis/drone_interfaces).
 
 ## Coordinate Systems
-PX4 uses a Foreward Right Down coordinate system, and ROS2 uses a Foreward Left Up coodinate system.  A transform broadcaster is included to publish a suitible transform from odom->base_link. A second transform is published from map->odom to correct for any deviations as a result of wind, or other odometry faults.  This transform relies on the GPS.
+PX4 uses a Foreward Right Down coordinate system, and ROS2 uses a Foreward Left Up coodinate system.  A transform broadcaster is included to publish a suitible transform from odom->base_link. A second transform is published from map->odom to correct for any deviations as a result of wind, or other odometry faults.  This transform relies on the GPS.  For obvious reasons this solution is built for the outdoor environment.
 
 # node info
 ```
