@@ -274,7 +274,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
     const std::shared_ptr<GoalHandleTakeoff> goal_handle)
   {
     // Takeoff has been cancelled.  Land the vehicle.
-    RCLCPP_INFO(this->get_logger(), "Received request to cancel takeoff");
+
     (void)goal_handle;
     
     const Action::Result land_result = _action->land();
@@ -598,7 +598,7 @@ void DroneNode::init()
       t.transform.rotation.x = odometry.q.x;
       t.transform.rotation.y = odometry.q.y;
       t.transform.rotation.z = odometry.q.z;
-      t.transform.rotation.w = odometry.q.x;
+      t.transform.rotation.w = odometry.q.w;
       tf_broadcaster_->sendTransform(t);
           
       // Publish odometry    
