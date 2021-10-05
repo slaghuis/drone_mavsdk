@@ -209,7 +209,9 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
   px4_vel_frd.right_m_s = -(msg->linear.y);
   px4_vel_frd.down_m_s = -(msg->linear.z);
       
-  px4_vel_frd.yawspeed_deg_s = -(msg->angular.z);  // CCW Yaw in ros is positive; CCW Yaw in PX4 is negative.
+  // ROS works in radians.  For some odd reason MAVSDK decided to impliment
+  // rotation in degress per second.  Convert ROS radisn to degrees.
+  px4_vel_frd.yawspeed_deg_s = -(msg->angular.z*180/M_PI);  // CCW Yaw in ros is positive; CCW Yaw in PX4 is negative.
       
   _offboard->set_velocity_body(px4_vel_frd);
 
