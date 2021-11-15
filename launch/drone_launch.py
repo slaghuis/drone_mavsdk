@@ -11,7 +11,9 @@ def generate_launch_description():
              output="screen",
              emulate_tty=True,
              parameters=[
-                {"connection_url": "udp://:14540"}
+                {"connection_url": "udp://:14540"},
+                {"height_topic": "vl53l1x/range"},
+                {"height_sensor_z_offset": 0.153}
              ]
            )
    
