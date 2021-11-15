@@ -709,7 +709,7 @@ void DroneNode::init()
     
     auto message = sensor_msgs::msg::NavSatFix();       
     message.header.stamp = now;
-    message.header.frame_id ="world";
+    message.header.frame_id ="map";      // Or should this be "world"?
     message.status.status = sensor_msgs::msg::NavSatStatus::STATUS_FIX;
     message.status.service = sensor_msgs::msg::NavSatStatus::SERVICE_GPS; 
     message.latitude = position.latitude_deg;
