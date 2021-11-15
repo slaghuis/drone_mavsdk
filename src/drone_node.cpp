@@ -65,6 +65,7 @@ public:
     // Declare ROS paramaters
     this->declare_parameter<std::string>("connection_url", "udp://:14540");
     this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
+    this->declare_parameter<float>("height_sensor_z_offset", 0.153);
 
     // Give the node a second to start up before initiating
     using namespace std::chrono_literals;
@@ -88,6 +89,7 @@ public:
   bool _have_global_origin;
   ConnectionResult connection_result = ConnectionResult::SystemNotConnected;
   float _last_x, _last_y, _last_z;
+  float height_sensor_z_offset_;
   
   // ROS2 Parameters
   std::string connection_url;
@@ -196,7 +198,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
     information.second.time_boot_ms,                       // [ms] Time since system boot
     msg->min_range * 100,                                  // [cm] Minimum distance sensor can measure.  ROS message is in Meters!      
     msg->max_range * 100,                                  // [cm] Maximum distance sensor can measure.  ROS message is in Meters!
-    msg->range * 100,                                      // [cm] Current distance reading.  ROS message is in Meters!
+    msg->range * 100 - height_sensor_z_offset_,            // [cm] Current distance reading.  ROS message is in Meters!
     MAV_DISTANCE_SENSOR::MAV_DISTANCE_SENSOR_INFRARED,     // Type of distance sensor. This is not aligned with msg->radiation_type,
     0,                                                     // Onboard ID of sensor     
     MAV_SENSOR_ORIENTATION::MAV_SENSOR_ROTATION_PITCH_270, // Direction the sensor faces
@@ -562,6 +564,7 @@ void DroneNode::init()
   
   std::string height_topic;
   this->get_parameter("height_topic", height_topic);
+  this->get_parameter("height_sensor_z_offset", height_sensor_z_offset_);
   
   height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
     height_topic, 5, std::bind(&DroneNode::height_callback, this, _1));
