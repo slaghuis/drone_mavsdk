@@ -59,52 +59,15 @@ public:
   explicit DroneNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
   : Node("drone_commander", options)
   {
-    
-    using namespace std::placeholders;
-    
+    // Initialise some global variables
     _have_global_origin = false;
           
-    // Services
-    arm_service_ = this->create_service<drone_interfaces::srv::Arm>("drone/arm", 
-      std::bind(&DroneNode::arm, this, _1, _2));
+    // Declare ROS paramaters
+    this->declare_parameter<std::string>("connection_url", "udp://:14540");
+    this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
 
-    offboard_service_ = this->create_service<drone_interfaces::srv::Offboard>("drone/offboard", 
-      std::bind(&DroneNode::offboard, this, _1, _2));
-    
-    // Action servers
-    this->takeoff_action_server_ = rclcpp_action::create_server<Takeoff>(
-      this,
-      "drone/takeoff",
-      std::bind(&DroneNode::takeoff_handle_goal, this, _1, _2),
-      std::bind(&DroneNode::takeoff_handle_cancel, this, _1),
-      std::bind(&DroneNode::takeoff_handle_accepted, this, _1));
-
-    this->land_action_server_ = rclcpp_action::create_server<Land>(
-      this,
-      "drone/land",
-      std::bind(&DroneNode::land_handle_goal, this, _1, _2),
-      std::bind(&DroneNode::land_handle_cancel, this, _1),
-      std::bind(&DroneNode::land_handle_accepted, this, _1));
-
-
-    // Subscribers
-    subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
-      "drone/cmd_vel", 10, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
-    
-    height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
-      "vl53l1x/range", 5, std::bind(&DroneNode::height_callback, this, _1));
-
-    // Publishers
-    using namespace std::chrono_literals;
-    odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 10);
-    battery_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("drone/battery", 5);    
-    nav_sat_publisher_ = this->create_publisher<sensor_msgs::msg::NavSatFix>("drone/gps", 10);
-    
-    // TF2 Broadcaster
-    tf_broadcaster_ =
-      std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-    
     // Give the node a second to start up before initiating
+    using namespace std::chrono_literals;
     one_off_timer_ = this->create_wall_timer(1000ms, std::bind(&DroneNode::init, this)); 
 
   }
@@ -543,7 +506,6 @@ void DroneNode::init()
   Mavsdk::Configuration config( Mavsdk::Configuration::UsageType::CompanionComputer);
   _mavsdk->set_configuration(config);
 
-  this->declare_parameter<std::string>("connection_url", "udp://:14540");
   this->get_parameter("connection_url", connection_url);
   
   RCLCPP_INFO(this->get_logger(), "Connecting with string: %s", connection_url.c_str());
@@ -568,9 +530,54 @@ void DroneNode::init()
     RCLCPP_INFO(this->get_logger(), "Waiting for system to be ready");
     rclcpp::sleep_for(std::chrono::seconds(1));
   }
+
+  // Now that we are connected, set up the ROS elements
+  using namespace std::placeholders;
+    
+  // Services
+  arm_service_ = this->create_service<drone_interfaces::srv::Arm>("drone/arm", 
+    std::bind(&DroneNode::arm, this, _1, _2));
+
+  offboard_service_ = this->create_service<drone_interfaces::srv::Offboard>("drone/offboard", 
+    std::bind(&DroneNode::offboard, this, _1, _2));
+    
+  // Action servers
+  this->takeoff_action_server_ = rclcpp_action::create_server<Takeoff>(
+    this,
+    "drone/takeoff",
+    std::bind(&DroneNode::takeoff_handle_goal, this, _1, _2),
+    std::bind(&DroneNode::takeoff_handle_cancel, this, _1),
+    std::bind(&DroneNode::takeoff_handle_accepted, this, _1));
+
+  this->land_action_server_ = rclcpp_action::create_server<Land>(
+    this,
+    "drone/land",
+    std::bind(&DroneNode::land_handle_goal, this, _1, _2),
+    std::bind(&DroneNode::land_handle_cancel, this, _1),
+    std::bind(&DroneNode::land_handle_accepted, this, _1));
+
+  // Subscribers
+  subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
+    "drone/cmd_vel", 10, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
+  
+  std::string height_topic;
+  this->get_parameter("height_topic", height_topic);
+  
+  height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
+    height_topic, 5, std::bind(&DroneNode::height_callback, this, _1));
+
+  // Publishers
+  odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 10);
+  battery_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("drone/battery", 5);    
+  nav_sat_publisher_ = this->create_publisher<sensor_msgs::msg::NavSatFix>("drone/gps", 10);
+    
+  // TF2 Broadcaster
+  tf_broadcaster_ =
+    std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+      
   
   // Subscribe and publish odometry messages
-    _telemetry->subscribe_odometry(
+  _telemetry->subscribe_odometry(
         [this](mavsdk::Telemetry::Odometry odometry) { 
       
       // We read maxsdk::Telemetry::Odometry in he FRD frame.  This is called "odom"
