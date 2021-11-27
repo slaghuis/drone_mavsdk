@@ -37,10 +37,6 @@ public:
   FramePublisher()
   : Node("odom_tf2_frame_publisher")
   {
-    // Declare and acquire `turtlename` parameter
-    // this->declare_parameter<std::string>("turtlename", "turtle");
-    // this->get_parameter("turtlename", turtlename_);
-
     tf_buffer_ =
       std::make_unique<tf2_ros::Buffer>(this->get_clock());
     transform_listener_ =
@@ -49,17 +45,12 @@ public:
     // Initialize the transform broadcaster
     tf_broadcaster_ =
       std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-
-    /*subscription_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      "drone/odom", 10,
-      std::bind(&FramePublisher::handle_imu_odom, this, _1));
-    */
-    
-    // Call on_timer function four times second second
+   
+    // Call on_timer function four times a second 
     timer_ = this->create_wall_timer(
       250ms, std::bind(&FramePublisher::on_timer, this));
       
-    RCLCPP_INFO(this->get_logger(), "Publishing transform from base_link_ned to base_link");  
+    RCLCPP_INFO(this->get_logger(), "Publishing transforms from odom -> base_link");  
   }
 
 private:
@@ -73,8 +64,6 @@ private:
     
     geometry_msgs::msg::TransformStamped transformStamped;
     
-    // Look up for the transformation between target_frame(odom_ned) and turtle2 frames
-    // and send velocity commands for turtle2 to reach target_frame
     try {
       transformStamped = tf_buffer_->lookupTransform(
         toFrameRel, fromFrameRel,
@@ -99,12 +88,11 @@ private:
     // Send the transformation
     tf_broadcaster_->sendTransform(transformStamped);
   }
-  // rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_;
+
   rclcpp::TimerBase::SharedPtr timer_{nullptr};
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::TransformListener> transform_listener_{nullptr};
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
-  std::string turtlename_;
 };
 
 int main(int argc, char * argv[])
