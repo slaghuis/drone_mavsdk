@@ -102,7 +102,6 @@ public:
   // Global Variables
   bool _have_global_origin;
   ConnectionResult connection_result = ConnectionResult::SystemNotConnected;
-  float _last_x, _last_y, _last_z;
   float height_sensor_z_offset_;
   
   // ROS2 Parameters
@@ -189,7 +188,7 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
   px4_vel_frd.down_m_s = -(msg->linear.z);
       
   // ROS works in radians.  For some odd reason MAVSDK decided to impliment
-  // rotation in degress per second.  Convert ROS radisn to degrees.
+  // rotation in degress per second.  Convert ROS radians to degrees.
   px4_vel_frd.yawspeed_deg_s = -(msg->angular.z*180/M_PI);  // CCW Yaw in ros is positive; CCW Yaw in PX4 is negative.
       
   _offboard->set_velocity_body(px4_vel_frd);
@@ -596,42 +595,33 @@ void DroneNode::init()
   // Subscribe and publish odometry messages
   _telemetry->subscribe_odometry(
         [this](mavsdk::Telemetry::Odometry odometry) { 
-      
-      // We read maxsdk::Telemetry::Odometry in he FRD frame.  This is called "odom"
-      // ROS works in the FLU orientation.  Implimented as "base_link"
-      // Publish a transform broadcast to roll the odom PI radians (180 degrees) and update the position from odom to base_link      
-      
-      _last_x = odometry.position_body.x_m;
-      _last_y = -odometry.position_body.y_m;  // Turn Left into right
-      _last_z = -odometry.position_body.z_m;  // Turn down into up
-          
+                 
       rclcpp::Time now = this->get_clock()->now();
           
-      // Publish transform odom->base_link    
       geometry_msgs::msg::TransformStamped t;
-      
+
+      // Read message content and assign it to
+      // corresponding tf variables
       t.header.stamp = now;
-      t.header.frame_id = "odom";
-      t.child_frame_id = "base_link";
+      t.header.frame_id = "odom_ned";
+      t.child_frame_id = "base_link_ned";
           
       t.transform.translation.x = odometry.position_body.x_m;
-      t.transform.translation.y = -odometry.position_body.y_m;  // Turn Left into right
-      t.transform.translation.z = -odometry.position_body.z_m;  // Turn down into up
+      t.transform.translation.y = odometry.position_body.y_m;
+      t.transform.translation.z = odometry.position_body.z_m; 
          
-      //tf2::Quaternion q;
-      //q.setRPY(3.1415, 0, 0);
       // Adopt the roll pitch and yaw from the drone.
       t.transform.rotation.x = odometry.q.x;
       t.transform.rotation.y = odometry.q.y;
       t.transform.rotation.z = odometry.q.z;
       t.transform.rotation.w = odometry.q.w;
-      tf_broadcaster_->sendTransform(t);
-          
+      tf_broadcaster_->sendTransform(t);    
+                              
       // Publish odometry    
       auto message = nav_msgs::msg::Odometry();
 
       message.header.stamp = now;
-      message.header.frame_id ="odom";
+      message.header.frame_id ="odom_ned";
 
       message.pose.pose.position.x = odometry.position_body.x_m;
       message.pose.pose.position.y = odometry.position_body.y_m;
@@ -648,7 +638,8 @@ void DroneNode::init()
       message.pose.covariance[21] = odometry.pose_covariance.covariance_matrix[15];
       message.pose.covariance[28] = odometry.pose_covariance.covariance_matrix[18];
       message.pose.covariance[35] = odometry.pose_covariance.covariance_matrix[20];
-        
+      
+      message.child_frame_id ="base_link_ned";
       message.twist.twist.linear.x = odometry.velocity_body.x_m_s;
       message.twist.twist.linear.y = odometry.velocity_body.y_m_s;
       message.twist.twist.linear.z = odometry.velocity_body.z_m_s;
