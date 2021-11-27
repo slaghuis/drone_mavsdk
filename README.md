@@ -2,7 +2,7 @@
 Base controller, exposing a ROS2 interface to MAVSDK to control drone in local flight.  This node depends on the [drone_interfaces package](https://github.com/slaghuis/drone_interfaces).
 
 ## Coordinate Systems
-PX4 uses a Foreward Right Down coordinate system, and ROS2 uses a Foreward Left Up coodinate system.  A transform broadcaster is included to publish a suitible transform from odom->base_link.
+PX4 uses a NED coordinate system, and ROS2 uses a ENU coodinate system.  A transform broadcaster is included to publish a suitible transform from odom->base_link.  The drone node published odomety in the DED frame.  A second node reads this transform and published the odom and base_link transforms, conpleting the tree in line with [ROS-REP 105](https://ros.org/reps/rep-0105.html).  All unit and coordinate conventions in this node are compliant to [ROS-REP 103](https://www.ros.org/reps/rep-0103.html).
 
 # node info
 ```
@@ -29,7 +29,10 @@ xxx@simulator:~/ros_ws$ ros2 node info /drone_node
 ```
 # Status
 Test scripts run 100% in a simulator environment.  Code is stable.
-Next Test : Compile on a Raspberry Pi, followed by a live flight test
+Compiles on a Raspberry Pi 3 and 4, and connects successfully to a Pixhawk 4 Mini.
+
+Next Test : A live flight test
+
 ## Test Scripts
 Arm the drone
 ```
