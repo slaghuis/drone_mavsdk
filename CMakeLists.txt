@@ -22,7 +22,8 @@ find_package(sensor_msgs REQUIRED)
 find_package(MAVSDK REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
-
+find_package(tf2_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 add_library(base_node_lib SHARED
   src/drone_node.cpp)
 target_include_directories(base_node_lib PRIVATE
@@ -52,12 +53,27 @@ target_link_libraries(base_node_lib
     MAVSDK::mavsdk
 )
 
+add_executable(odom_tf2_broadcaster src/odom_broadcaster.cpp)
+ament_target_dependencies(
+    odom_tf2_broadcaster
+    geometry_msgs
+    nav_msgs
+    rclcpp
+    tf2
+    tf2_ros 
+    tf2_msgs
+    tf2_geometry_msgs)
+    
 install(TARGETS
   base_node_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 
+install(TARGETS
+    odom_tf2_broadcaster
+    DESTINATION lib/${PROJECT_NAME})
+    
 install(
   DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
