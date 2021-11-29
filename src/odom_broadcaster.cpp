@@ -69,7 +69,7 @@ private:
         toFrameRel, fromFrameRel,
         tf2::TimePointZero);
     } catch (tf2::TransformException & ex) {
-      RCLCPP_INFO(
+      RCLCPP_DEBUG(
         this->get_logger(), "Could not transform %s to %s: %s",
         toFrameRel.c_str(), fromFrameRel.c_str(), ex.what());
       return;
