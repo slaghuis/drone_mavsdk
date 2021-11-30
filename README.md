@@ -1,8 +1,13 @@
 # Drone MAVSDK
-Base controller, exposing a ROS2 interface to MAVSDK to control drone in local flight.  This node depends on the [drone_interfaces package](https://github.com/slaghuis/drone_interfaces).
+Base controller, exposing a ROS2 interface to the PX4 flight controller using the MAVSDK library to control a drone in local flight.  This node depends on the [drone_interfaces package](https://github.com/slaghuis/drone_interfaces).
 
 ## Coordinate Systems
-PX4 uses a NED coordinate system, and ROS2 uses a ENU coodinate system.  A transform broadcaster is included to publish a suitible transform from odom->base_link.  The drone node published odomety in the DED frame.  A second node reads this transform and published the odom and base_link transforms, conpleting the tree in line with [ROS-REP 105](https://ros.org/reps/rep-0105.html).  All unit and coordinate conventions in this node are compliant to [ROS-REP 103](https://www.ros.org/reps/rep-0103.html).
+### Drone node
+PX4 uses a NED coordinate system, and ROS2 uses an ENU coodinate system. This node publishes odometry in the odom_ned frame, and publishes an odom_ned -> base_link_ned transform.  A static transform broadcaster is needed to publish a map->odom_ned transform, effectively flipping and rotating NED into ENU.  
+### Odom tf2 Broadcaser
+A second node is included that listens to tf2 transforms from base_link_ned to map, and publishes a odom->base_link transform.  This node also publishes odometry in the odom frame. Similarly, this node needs a map->odom static transform broadcaster.  
+
+The static transform broadcasters are defined in the launch frame This completes the tree in line with [ROS-REP 105](https://ros.org/reps/rep-0105.html).  All unit and coordinate conventions in this node are compliant to [ROS-REP 103](https://www.ros.org/reps/rep-0103.html).
 
 # node info
 ```
@@ -60,4 +65,4 @@ ros2 topic pub --once /drone/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 2.0, 
 ```
 
 # Caution
-This code has not flown.
+This code has not flown on the drone yet, but flies very well in the simulator.  The maiden flight is planned for December 2021
