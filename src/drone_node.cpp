@@ -12,6 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/* **********************************************************************
+ * Connects to PX4 using MAVSDK library and expose the following interfaces
+ * Publishes odometry data in the odom_ned frame as nav_msgs::msg::Odometry
+ * Published a tf2 transform from odom_ned to base_link_ned frames
+ * Publishes GPS position as sensor_msgs::msg::NavSatFix
+ * Publishes Battery state as sensor_msgs::msg::BatteryState
+ * Subscribes to geometry_msgs::msg::Twist as cmd_vel in the FLU local frame
+ *   and passes it to PX4 to effect motion
+ * Subscribes to downward facing range sensor as sensor_msgs::msg::range
+ *   and passes it on the PX4
+ * Action server to call the PX4 TakeOff command
+ * Action server to call the PX4 Land command
+ * Simple server to ARM the drone
+ * Simple server to set the PX4 in Offboard mode
+ * **********************************************************************/
 #include <chrono>
 #include <functional>
 #include <memory>
