@@ -226,7 +226,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
     information.second.time_boot_ms,                       // [ms] Time since system boot
     msg->min_range * 100,                                  // [cm] Minimum distance sensor can measure.  ROS message is in Meters!      
     msg->max_range * 100,                                  // [cm] Maximum distance sensor can measure.  ROS message is in Meters!
-    msg->range * 100 - height_sensor_z_offset_,            // [cm] Current distance reading.  ROS message is in Meters!
+    (msg->range - height_sensor_z_offset_) * 100,          // [cm] Current distance reading.  ROS message is in Meters!
     MAV_DISTANCE_SENSOR::MAV_DISTANCE_SENSOR_INFRARED,     // Type of distance sensor. This is not aligned with msg->radiation_type,
     0,                                                     // Onboard ID of sensor     
     MAV_SENSOR_ORIENTATION::MAV_SENSOR_ROTATION_PITCH_270, // Direction the sensor faces
