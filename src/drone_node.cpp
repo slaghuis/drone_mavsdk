@@ -88,13 +88,6 @@ public:
   explicit DroneNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
   : Node("drone_commander", options)
   {
-    // Initialise some global variables
-    _have_global_origin = false;
-          
-    // Declare ROS paramaters
-    this->declare_parameter<std::string>("connection_url", "udp://:14540");
-    this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
-    this->declare_parameter<float>("height_sensor_z_offset", 0.153);
 
     // Give the node a second to start up before initiating
     using namespace std::chrono_literals;
@@ -104,23 +97,17 @@ public:
 
   private:
 
-  // MAVSDK specific parameters
-  std::shared_ptr<mavsdk::Mavsdk> _mavsdk;
-  std::shared_ptr<mavsdk::Telemetry> _telemetry;
+  // MAVSDK specific variables
+  Mavsdk _mavsdk;
+    
   std::shared_ptr<mavsdk::Action> _action;
+  std::shared_ptr<mavsdk::Telemetry> _telemetry;
   std::shared_ptr<mavsdk::Offboard> _offboard;
   std::shared_ptr<mavsdk::MavlinkPassthrough> _passthrough;
   std::shared_ptr<mavsdk::Info> _info; 
   
-  std::shared_ptr<mavsdk::geometry::CoordinateTransformation> _coordinate_transformation;
-  
   // Global Variables
-  bool _have_global_origin;
-  ConnectionResult connection_result = ConnectionResult::SystemNotConnected;
   float height_sensor_z_offset_;
-  
-  // ROS2 Parameters
-  std::string connection_url;
   
   // General Timers
   rclcpp::TimerBase::SharedPtr one_off_timer_;
@@ -171,7 +158,7 @@ public:
                
   // Utiltiy Procedures
   void init();            
-  void wait_until_discover();
+  std::shared_ptr<System> get_system(Mavsdk& mavsdk);
  
 };  // class DroneNode
 
@@ -530,26 +517,25 @@ void DroneNode::init()
   // Should one not run this every second to check if we are still connected to the FC?  Just a though
   this->one_off_timer_->cancel();
   
+  // Declare and Get ROS paramaters
+  std::string connection_url = this->declare_parameter<std::string>("connection_url", "udp://:14540");
+  std::string height_topic = this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
+  height_sensor_z_offset_ = this->declare_parameter<float>("height_sensor_z_offset", 0.153);
+  
   // Connect to the flight controller and set up the interfaces for the rest to work.
-  _mavsdk = std::make_shared<mavsdk::Mavsdk>();
-
   Mavsdk::Configuration config( Mavsdk::Configuration::UsageType::CompanionComputer);
-  _mavsdk->set_configuration(config);
-
-  this->get_parameter("connection_url", connection_url);
+  _mavsdk.set_configuration(config);
   
   RCLCPP_INFO(this->get_logger(), "Connecting with string: %s", connection_url.c_str());
       
-  connection_result = _mavsdk->add_any_connection(connection_url.c_str());
+  ConnectionResult connection_result = _mavsdk.add_any_connection(connection_url.c_str());
       
   if (connection_result != ConnectionResult::Success) {
-        throw ConnectionException();
+    throw ConnectionException();
   }
       
-  wait_until_discover();     
-
-  auto target_system = _mavsdk->systems().at(0);    
-  
+  auto target_system = get_system(_mavsdk);  
+  // Uniform Initialization
   _action = std::make_shared<mavsdk::Action>(target_system);
   _offboard = std::make_shared<mavsdk::Offboard>(target_system);
   _telemetry = std::make_shared<mavsdk::Telemetry>(target_system);
@@ -589,11 +575,7 @@ void DroneNode::init()
   // Subscribers
   subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
     "drone/cmd_vel", 10, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
-  
-  std::string height_topic;
-  this->get_parameter("height_topic", height_topic);
-  this->get_parameter("height_sensor_z_offset", height_sensor_z_offset_);
-  
+    
   height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
     height_topic, 5, std::bind(&DroneNode::height_callback, this, _1));
 
@@ -605,8 +587,7 @@ void DroneNode::init()
   // TF2 Broadcaster
   tf_broadcaster_ =
     std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-      
-  
+        
   // Subscribe and publish odometry messages
   _telemetry->subscribe_odometry(
         [this](mavsdk::Telemetry::Odometry odometry) { 
@@ -674,6 +655,7 @@ void DroneNode::init()
         
    });  
   
+  // Subscribe and publish battery state
   _telemetry->subscribe_battery(
         [this](mavsdk::Telemetry::Battery battery) {
           
@@ -700,26 +682,7 @@ void DroneNode::init()
           
   });     
   
-  // Obtain the GPS cooridnates where the estimator has been initialised (map frame [0;0;0])
-  // What if I never obtain a fix?  Then I will keep in publishing a zero transform?
-  _telemetry->get_gps_global_origin_async(
-        [this](mavsdk::Telemetry::Result res, 
-               mavsdk::Telemetry::GpsGlobalOrigin origin) {
-          
-    if(res == mavsdk::Telemetry::Result::Success) {      
-      // Setup a projection reference      
-      mavsdk::geometry::CoordinateTransformation::GlobalCoordinate global_coordinate;
-      global_coordinate.latitude_deg = origin.latitude_deg;
-      global_coordinate.longitude_deg = origin.longitude_deg;
-      _coordinate_transformation = std::make_shared<mavsdk::geometry::CoordinateTransformation>(global_coordinate); 
-      
-      _have_global_origin = true;          
-    }  
-          
-  });
-
-  // Use the _global_origin as reference and calculate where we are in the map frame. This shouls give 
-  // a good map->odom frame transformation
+  // Subscribe and publish gps messages
   _telemetry->subscribe_position([this](Telemetry::Position position) {
       // std::cout << "Vehicle is at: " << position.latitude_deg << ", " << position.longitude_deg
       //            << " degrees\n";
@@ -738,68 +701,43 @@ void DroneNode::init()
     // message.position_covariance[0] = 0.0;  // Leave blank
     message.position_covariance_type = sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_UNKNOWN;          
     nav_sat_publisher_->publish(message);        
-
-    /*  Removed this capability now as it is incorrect
-        Should be something like a world->map transform
-        
-    if (_have_global_origin) {
-        
-      // Transform current position
-      mavsdk::geometry::CoordinateTransformation::GlobalCoordinate global_coordinate;
-      global_coordinate.latitude_deg = position.latitude_deg;
-      global_coordinate.longitude_deg = position.longitude_deg;
-      auto local = _coordinate_transformation->local_from_global(global_coordinate);
-        
-      // Publish a map-> odom transform based on the calculated position relative to odometry
-      // SHOULD this be done by listening to a transform?  Is there a better way.  What if this is old?
-      
-      float err_x = _last_x - local.north_m;
-      float err_y = _last_y - local.east_m;
-      float err_z = _last_z - position.relative_altitude_m;
-      RCLCPP_DEBUG(this->get_logger(), "Publishing transform from map->odom [%.2f;%.2f;%.2f]", err_x, err_y, err_z);
-              
-      //Publish a transform.   
-      geometry_msgs::msg::TransformStamped t;
-      
-      t.header.stamp = now;
-      t.header.frame_id = "map";
-      t.child_frame_id = "odom";
-          
-      t.transform.translation.x = err_x;  
-      t.transform.translation.y = err_y;  // TEST well, is NED map frames handled correctly???
-      t.transform.translation.z = err_z;  
-         
-      t.transform.rotation.x = 0;
-      t.transform.rotation.y = 0;
-      t.transform.rotation.z = 0;
-      t.transform.rotation.w = 1;
-      tf_broadcaster_->sendTransform(t);
-    } */
     
   });
   
   RCLCPP_INFO(this->get_logger(), "Node is ready");
 }
   
-void DroneNode::wait_until_discover()
+std::shared_ptr<mavsdk::System> DroneNode::get_system(Mavsdk& mavsdk)
 {
-    RCLCPP_INFO(this->get_logger(), "Waiting to discover system...");
-    std::promise<void> discover_promise;
-    auto discover_future = discover_promise.get_future();
+  RCLCPP_INFO(this->get_logger(), "Waiting to discover system...");
+  auto prom = std::promise<std::shared_ptr<System>>{};
+  auto fut = prom.get_future();
 
-    _mavsdk->subscribe_on_new_system([&]() {
-        const auto system = _mavsdk->systems().at(0);
+  // We wait for new systems to be discovered, once we find one that has an
+  // autopilot, we decide to use it.
+  mavsdk.subscribe_on_new_system([&mavsdk, &prom, this]() {
+    auto system = mavsdk.systems().back();
 
-        if (system->is_connected()) {
-            RCLCPP_INFO(this->get_logger(), "Discovered system");
+    if (system->has_autopilot()) {
+      RCLCPP_INFO(this->get_logger(), "Discovered autopilot");
+      
+      // Unsubscribe again as we only want to find one system.
+      mavsdk.subscribe_on_new_system(nullptr);
+      prom.set_value(system);
+    }
+  });
 
-            discover_promise.set_value();
-        }
-    });
+  // We usually receive heartbeats at 1Hz, therefore we should find a
+  // system after around 3 seconds max, surely.
+  if (fut.wait_for(std::chrono::seconds(3)) == std::future_status::timeout) {
+    RCLCPP_ERROR(this->get_logger(), "No autopilot found.");
+    return {};
+  }
 
-    discover_future.wait();
+  // Get discovered system now.
+  return fut.get();
 }
-
+  
 
 }  // namespace drone_node
 

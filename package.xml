@@ -4,7 +4,7 @@
    schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
  <name>drone</name>
- <version>2.5.1</version>
+ <version>2.5.2</version>
  <description>ROS2 Node leveraging MAVSDK to expose the flight controller to ROS</description>
  <maintainer email="eslaghuis@gmail.com">user</maintainer>
  <license>Apache License 2.0</license>
