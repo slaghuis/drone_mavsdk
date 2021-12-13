@@ -496,18 +496,28 @@ void DroneNode::offboard(const std::shared_ptr<drone_interfaces::srv::Offboard::
   Offboard::Result offboard_result;
   if (request->enable == 1) {
     // Switch to offboard
-    // Send it once before starting offboard, otherwise it will be rejected.
-    Offboard::VelocityBodyYawspeed stay{};
-    _offboard->set_velocity_body(stay);
 
+    // Create a setpoint before starting offboard mode (in this case a null setpoint)
+    _offboard->set_velocity_body({0.0f, 0.0f, 0.0f, 0.0f});
+    
     offboard_result = _offboard->start();
+    
+    if (offboard_result != Offboard::Result::Success) {
+      RCLCPP_ERROR(this->get_logger(), "Offboard::start() failed: %s", offboard_result);
+    }
+
   } else {
-    // Disable offboard
+    // Disable offboard. "The SDK will then clear the current setpoint and put the vehicle into Hold flight mode."
     offboard_result = _offboard->stop();
+    
+    if (offboard_result != Offboard::Result::Success) {
+      RCLCPP_ERROR(this->get_logger(), "Offboard::stop() failed: %s", offboard_result);
+    }
+
   }  
     
   response->result = (offboard_result == Offboard::Result::Success);    
-  
+    
 }
 
 // Utilities ////////////////////////////////////////////////////////////////////////////
