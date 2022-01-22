@@ -545,12 +545,16 @@ void DroneNode::init()
   }
       
   auto target_system = get_system(_mavsdk);  
+  if (!target_system) {
+    throw ConnectionException();
+  }
+  
   // Uniform Initialization
   _action = std::make_shared<mavsdk::Action>(target_system);
   _offboard = std::make_shared<mavsdk::Offboard>(target_system);
-  _telemetry = std::make_shared<mavsdk::Telemetry>(target_system);
   _passthrough = std::make_shared<mavsdk::MavlinkPassthrough>(target_system);
   _info = std::make_shared<mavsdk::Info>(target_system);
+  _telemetry = std::make_shared<mavsdk::Telemetry>(target_system);
 
   while (!_telemetry->health_all_ok()) {
     RCLCPP_INFO(this->get_logger(), "Waiting for system to be ready");
