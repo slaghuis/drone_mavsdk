@@ -533,8 +533,8 @@ void DroneNode::init()
   height_sensor_z_offset_ = this->declare_parameter<float>("height_sensor_z_offset", 0.153);
   
   // Connect to the flight controller and set up the interfaces for the rest to work.
-  Mavsdk::Configuration config( Mavsdk::Configuration::UsageType::CompanionComputer);
-  _mavsdk.set_configuration(config);
+  //Mavsdk::Configuration config( Mavsdk::Configuration::UsageType::CompanionComputer);
+  //_mavsdk.set_configuration(config);
   
   RCLCPP_INFO(this->get_logger(), "Connecting with string: %s", connection_url.c_str());
       
