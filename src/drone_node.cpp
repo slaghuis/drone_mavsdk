@@ -28,6 +28,9 @@
  * Simple server to set the PX4 in Offboard mode
  * **********************************************************************/
 #include <chrono>
+#include <cstdint>
+#include <iostream>
+#include <future>
 #include <functional>
 #include <memory>
 #include <thread>
@@ -42,7 +45,7 @@
 
 // MAVSDK Sepecific
 #include <mavsdk/mavsdk.h>
-#include <mavsdk/geometry.h>
+//#include <mavsdk/geometry.h>
 #include <mavsdk/plugins/info/info.h>
 #include <mavsdk/plugins/action/action.h>
 #include <mavsdk/plugins/offboard/offboard.h>
