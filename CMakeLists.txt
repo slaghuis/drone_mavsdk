@@ -45,11 +45,6 @@ ament_target_dependencies(base_node_lib
 rclcpp_components_register_node(base_node_lib PLUGIN "drone_node::DroneNode" EXECUTABLE drone_node)
 
 target_link_libraries(base_node_lib
-    MAVSDK::mavsdk_mavlink_passthrough
-    MAVSDK::mavsdk_telemetry
-    MAVSDK::mavsdk_offboard
-    MAVSDK::mavsdk_action
-    MAVSDK::mavsdk_info 
     MAVSDK::mavsdk
 )
 
