@@ -49,7 +49,7 @@ target_link_libraries(base_node_lib
     MAVSDK::mavsdk_telemetry
     MAVSDK::mavsdk_offboard
     MAVSDK::mavsdk_action
-    MAVSDK::mavsdk_info    
+    MAVSDK::mavsdk_info 
     MAVSDK::mavsdk
 )
 
