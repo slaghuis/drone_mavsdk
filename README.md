@@ -36,7 +36,7 @@ xxx@simulator:~/ros_ws$ ros2 node info /drone_node
 Test scripts run 100% in a simulator environment.  Code is stable.
 Compiles on a Raspberry Pi 3 and 4, and connects successfully to a Pixhawk 4 Mini.
 
-Next Test : A live flight test
+First test flights on an actual drone using a Pixhawk 4.0 Mini were good. 
 
 ## Test Scripts
 Arm the drone
@@ -63,6 +63,3 @@ Fly in a circle
 ```
 ros2 topic pub --once /drone/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 2.0, y: 0.0, z: 0.5}, angular: {x: 0.0, y: 0.0, z: 0.5}}"
 ```
-
-# Caution
-This code has not flown on the drone yet, but flies very well in the simulator.  The maiden flight is planned for December 2021
