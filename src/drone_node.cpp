@@ -71,12 +71,6 @@
 
 using namespace mavsdk;
 
-struct ConnectionException : public std::exception {
-  const char * what () const throw () {
-    return "Connection Failed. Check Connection String Parameter.";
-  }
-};
-
 namespace drone_node
 {
 class DroneNode : public rclcpp::Node
@@ -89,19 +83,26 @@ public:
 
   DRONE_NODE_PUBLIC
   explicit DroneNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
-  : Node("drone_commander", options)
+  : Node("drone_node", options)
   {
-
-    // Give the node a second to start up before initiating
+    // Declare parameters
+    this->declare_parameter<std::string>("connection_url", "udp://:14540");
+    this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
+    this->declare_parameter<float>("height_sensor_z_offset", 0.153);
+    
+    connection_result_ = ConnectionResult::SystemNotConnected;
+    
+    // Give the rest of the robot time to start up before we connect to the sharp end.
+    // This timer will try every five seconds to connect, until a connetion has been established.
     using namespace std::chrono_literals;
-    one_off_timer_ = this->create_wall_timer(1000ms, std::bind(&DroneNode::init, this)); 
-
+    one_off_timer_ = this->create_wall_timer(5000ms, std::bind(&DroneNode::init, this)); 
   }
 
   private:
 
   // MAVSDK specific variables
-  Mavsdk _mavsdk;
+  Mavsdk mavsdk_;
+  ConnectionResult connection_result_;
     
   std::shared_ptr<mavsdk::Action> _action;
   std::shared_ptr<mavsdk::Telemetry> _telemetry;
@@ -526,31 +527,26 @@ void DroneNode::offboard(const std::shared_ptr<drone_interfaces::srv::Offboard::
 // Utilities ////////////////////////////////////////////////////////////////////////////
 void DroneNode::init()
 {
-  // Only run this once.  Stop the timer that triggered this.
-  // Should one not run this every second to check if we are still connected to the FC?  Just a though
-  this->one_off_timer_->cancel();
-  
-  // Declare and Get ROS paramaters
-  std::string connection_url = this->declare_parameter<std::string>("connection_url", "udp://:14540");
-  std::string height_topic = this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
-  height_sensor_z_offset_ = this->declare_parameter<float>("height_sensor_z_offset", 0.153);
-  
-  // Connect to the flight controller and set up the interfaces for the rest to work.
-  //Mavsdk::Configuration config( Mavsdk::Configuration::UsageType::CompanionComputer);
-  //_mavsdk.set_configuration(config);
-  
-  RCLCPP_INFO(this->get_logger(), "Connecting with string: %s", connection_url.c_str());
-      
-  ConnectionResult connection_result = _mavsdk.add_any_connection(connection_url.c_str());
-      
-  if (connection_result != ConnectionResult::Success) {
-    throw ConnectionException();
+    
+  // Get ROS paramaters  
+  std::string connection_url;
+  this->get_parameter<std::string>("connection_url", connection_url);
+       
+  if (connection_result_ != ConnectionResult::Success) {
+    RCLCPP_INFO(this->get_logger(), "Connecting with string: %s", connection_url.c_str());
+   connection_result_ = mavsdk_.add_any_connection(connection_url.c_str());
+  }    
+  if (connection_result_ != ConnectionResult::Success) {
+    return;
   }
-      
-  auto target_system = get_system(_mavsdk);  
+
+  auto target_system = get_system(mavsdk_);  
   if (!target_system) {
-    throw ConnectionException();
+    return;
   }
+  
+  // Now that we have a system, stop the timer and set the rest of the node up.
+  this->one_off_timer_->cancel();
   
   // Uniform Initialization
   _action = std::make_shared<mavsdk::Action>(target_system);
@@ -592,6 +588,10 @@ void DroneNode::init()
   // Subscribers
   subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
     "drone/cmd_vel", 10, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
+
+  std::string height_topic;
+  this->get_parameter<std::string>("height_topic", height_topic);
+  this->get_parameter<float>("height_sensor_z_offset", height_sensor_z_offset_);  
     
   height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
     height_topic, 5, std::bind(&DroneNode::height_callback, this, _1));
