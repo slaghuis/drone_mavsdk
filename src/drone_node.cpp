@@ -89,6 +89,7 @@ public:
     this->declare_parameter<std::string>("connection_url", "udp://:14540");
     this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
     this->declare_parameter<float>("height_sensor_z_offset", 0.153);
+    this->declare_parameter<bool>("use_height_sensor", false);
     
     connection_result_ = ConnectionResult::SystemNotConnected;
     
@@ -590,12 +591,16 @@ void DroneNode::init()
     "drone/cmd_vel", 10, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
 
   std::string height_topic;
+  bool subscribe_height;
   this->get_parameter<std::string>("height_topic", height_topic);
   this->get_parameter<float>("height_sensor_z_offset", height_sensor_z_offset_);  
-    
-  height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
-    height_topic, 5, std::bind(&DroneNode::height_callback, this, _1));
-
+  this->get_parameter<bool>("use_height_sensor", subscribe_height);
+  
+  if(subscribe_height) {
+    height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
+      height_topic, 5, std::bind(&DroneNode::height_callback, this, _1));
+  }
+  
   // Publishers
   odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 10);
   battery_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("drone/battery", 5);    

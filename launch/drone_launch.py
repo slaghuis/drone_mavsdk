@@ -26,7 +26,8 @@ def generate_launch_description():
              parameters=[
                 {"connection_url": "udp://:14540"},
                 {"height_topic": "vl53l1x/range"},
-                {"height_sensor_z_offset": 0.153}
+                {"height_sensor_z_offset": 0.153},
+                {"use_height_sensor": False}
              ]
     )
     
