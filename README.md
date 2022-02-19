@@ -33,10 +33,10 @@ xxx@simulator:~/ros_ws$ ros2 node info /drone_node
   
 ```
 # Status
-Test scripts run 100% in a simulator environment.  Code is stable.
+Test scripts run 100% in a simulator environment.  The code is stable.
 Compiles on a Raspberry Pi 3 and 4, and connects successfully to a Pixhawk 4 Mini.
 
-First test flights on an actual drone using a Pixhawk 4.0 Mini were good. 
+First test flights on an actual drone using a Pixhawk 4.0 Mini were good.  The code seems flight ready. 
 
 ## Test Scripts
 Arm the drone
@@ -56,7 +56,7 @@ ros2 action send_goal /drone/land "drone_interfaces/action/Land" "{gear_down: tr
 
 Enable offboard mode
 ```
-ros2 service call /drone/offboard drone_interfaces/srv/Offboard "{enable: 0}"
+ros2 service call /drone/offboard drone_interfaces/srv/Offboard "{enable: 1}"
 ```
 
 Fly in a circle
