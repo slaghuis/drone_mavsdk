@@ -1,4 +1,4 @@
-// Copyright 2021 Xeni Robotics
+// Copyright 2021, 2022 Xeni Robotics
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ public:
    
     // Call on_timer function four times a second 
     timer_ = this->create_wall_timer(
-      250ms, std::bind(&FramePublisher::on_timer, this));
+      35ms, std::bind(&FramePublisher::on_timer, this));   // PX4 publishes odometry at 28 hz.
       
     RCLCPP_INFO(this->get_logger(), "Publishing transforms from odom -> base_link");  
   }
@@ -61,6 +61,7 @@ private:
     // Publish a odom->base_link transform
     std::string fromFrameRel = "base_link_ned";
     std::string toFrameRel = "odom";
+    rclcpp::Time now = this->get_clock()->now();
     
     geometry_msgs::msg::TransformStamped transformStamped;
     
@@ -83,6 +84,7 @@ private:
         transformStamped.transform.translation.z);
     
     transformStamped.header.frame_id = "odom";
+    transformStamped.header.stamp = now;
     transformStamped.child_frame_id = "base_link";
     
     // Send the transformation

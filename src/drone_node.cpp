@@ -45,7 +45,6 @@
 
 // MAVSDK Sepecific
 #include <mavsdk/mavsdk.h>
-//#include <mavsdk/geometry.h>
 #include <mavsdk/plugins/info/info.h>
 #include <mavsdk/plugins/action/action.h>
 #include <mavsdk/plugins/offboard/offboard.h>
@@ -150,7 +149,6 @@ public:
     const std::shared_ptr<GoalHandleLand> goal_handle);
   void land_handle_accepted(const std::shared_ptr<GoalHandleLand> goal_handle);
   void land_execute(const std::shared_ptr<GoalHandleLand> goal_handle);
-
 
   // Services
   rclcpp::Service<drone_interfaces::srv::Arm>::SharedPtr arm_service_;
@@ -602,7 +600,7 @@ void DroneNode::init()
   }
   
   // Publishers
-  odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 10);
+  odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 50);
   battery_publisher_ = this->create_publisher<sensor_msgs::msg::BatteryState>("drone/battery", 5);    
   nav_sat_publisher_ = this->create_publisher<sensor_msgs::msg::NavSatFix>("drone/gps", 10);
     
