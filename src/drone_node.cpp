@@ -609,6 +609,8 @@ void DroneNode::init()
     std::make_unique<tf2_ros::TransformBroadcaster>(*this);
         
   // Subscribe and publish odometry messages
+  // ROS REP 103 states: "For outdoor systems where it is desirable to work under the north east down
+  // (NED) convention, define an appropriately transformed secondary frame with the '_ned' suffix"
   _telemetry->subscribe_odometry(
         [this](mavsdk::Telemetry::Odometry odometry) { 
                  
@@ -621,10 +623,29 @@ void DroneNode::init()
       t.header.stamp = now;
       t.header.frame_id = "odom_ned";
       t.child_frame_id = "base_link_ned";
-          
+      
       t.transform.translation.x = odometry.position_body.x_m;
       t.transform.translation.y = odometry.position_body.y_m;
       t.transform.translation.z = odometry.position_body.z_m; 
+         
+      // Adopt the roll pitch and yaw from the drone.
+      t.transform.rotation.x = odometry.q.x;
+      t.transform.rotation.y = odometry.q.y;
+      t.transform.rotation.z = odometry.q.z;
+      t.transform.rotation.w = odometry.q.w;
+      tf_broadcaster_->sendTransform(t);    
+          
+          
+      // Read message content and assign it to
+      // corresponding tf variables
+      t.header.stamp = now;
+      t.header.frame_id = "odom";
+      t.child_frame_id = "base_link";
+      
+      // swap x and y and negate z    
+      t.transform.translation.x = odometry.position_body.y_m;
+      t.transform.translation.y = odometry.position_body.x_m;
+      t.transform.translation.z = -odometry.position_body.z_m; 
          
       // Adopt the roll pitch and yaw from the drone.
       t.transform.rotation.x = odometry.q.x;

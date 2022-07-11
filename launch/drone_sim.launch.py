@@ -8,13 +8,13 @@ def generate_launch_description():
     map_odom_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments=['0','0','0','0','0','0','1','map','odom']          
+        arguments=['0','0','0','0','0','0','map','odom']          
     )
 
     map_odom_ned_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments=['0','0','0','1.57', '0', '3.14','map','odom_ned']          
+        arguments=['0','0','0','3.1415', '0', '1.5708','map','odom_ned']          
     )
     
     drone_node = Node(
