@@ -15,7 +15,7 @@
 /* **********************************************************************
  * Connects to PX4 using MAVSDK library and expose the following interfaces
  * Publishes odometry data in the odom_ned frame as nav_msgs::msg::Odometry
- * Published a tf2 transform from odom_ned to base_link_ned frames
+ * Published a tf2 transform from odom_ned to base_link_frd frames
  * Publishes GPS position as sensor_msgs::msg::NavSatFix
  * Publishes Battery state as sensor_msgs::msg::BatteryState
  * Subscribes to geometry_msgs::msg::Twist as cmd_vel in the FLU local frame
@@ -183,10 +183,7 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
   }
       
   // Receive messages in ROS base_link FLU ; X->Foreward, Y->Left Z->Up
-  // Send to PX4 in FRD : X->Foreward, Y->Rightl Z->Down.
-      
-  RCLCPP_DEBUG(this->get_logger(), "I heard: foreward = '%f' right = '%f'", msg->linear.x, msg->linear.y);
-     
+  // Send to PX4 in FRD : X->Foreward, Y->Right Z->Down.
   mavsdk::Offboard::VelocityBodyYawspeed px4_vel_frd{};
   px4_vel_frd.forward_m_s = msg->linear.x;
   px4_vel_frd.right_m_s = -(msg->linear.y);
@@ -194,7 +191,7 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
       
   // ROS works in radians.  For some odd reason MAVSDK decided to impliment
   // rotation in degress per second.  Convert ROS radians to degrees.
-  px4_vel_frd.yawspeed_deg_s = -(msg->angular.z*180/M_PI);  // CCW Yaw in ros is positive; CCW Yaw in PX4 is negative.
+  px4_vel_frd.yawspeed_deg_s = msg->angular.z*180/M_PI; 
       
   _offboard->set_velocity_body(px4_vel_frd);
 
@@ -586,7 +583,7 @@ void DroneNode::init()
 
   // Subscribers
   subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
-    "drone/cmd_vel", 10, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
+    "drone/cmd_vel", 20, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
 
   std::string height_topic;
   bool subscribe_height;
@@ -622,7 +619,7 @@ void DroneNode::init()
       // corresponding tf variables
       t.header.stamp = now;
       t.header.frame_id = "odom_ned";
-      t.child_frame_id = "base_link_ned";
+      t.child_frame_id = "base_link_frd";
       
       t.transform.translation.x = odometry.position_body.x_m;
       t.transform.translation.y = odometry.position_body.y_m;
@@ -657,6 +654,8 @@ void DroneNode::init()
       // Publish odometry    
       auto message = nav_msgs::msg::Odometry();
 
+      //RCLCPP_INFO(this->get_logger(), "Velocity Frame = %d, Pose Frame = %d", odometry.child_frame_id, odometry.frame_id);
+          
       message.header.stamp = now;
       message.header.frame_id ="odom_ned";
 
@@ -676,13 +675,13 @@ void DroneNode::init()
       message.pose.covariance[28] = odometry.pose_covariance.covariance_matrix[18];
       message.pose.covariance[35] = odometry.pose_covariance.covariance_matrix[20];
       
-      message.child_frame_id ="base_link_ned";
+      message.child_frame_id ="base_link_frd";
       message.twist.twist.linear.x = odometry.velocity_body.x_m_s;
       message.twist.twist.linear.y = odometry.velocity_body.y_m_s;
       message.twist.twist.linear.z = odometry.velocity_body.z_m_s;
             
-      message.twist.twist.angular.x = odometry.angular_velocity_body.pitch_rad_s;
-      message.twist.twist.angular.y = odometry.angular_velocity_body.roll_rad_s;
+      message.twist.twist.angular.x = odometry.angular_velocity_body.roll_rad_s;
+      message.twist.twist.angular.y = odometry.angular_velocity_body.pitch_rad_s;
       message.twist.twist.angular.z = odometry.angular_velocity_body.yaw_rad_s;
 
       message.twist.covariance[0] = odometry.velocity_covariance.covariance_matrix[0];
