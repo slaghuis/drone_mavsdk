@@ -20,8 +20,6 @@
  * Publishes Battery state as sensor_msgs::msg::BatteryState
  * Subscribes to geometry_msgs::msg::Twist as cmd_vel in the FLU local frame
  *   and passes it to PX4 to effect motion
- * Subscribes to downward facing range sensor as sensor_msgs::msg::range
- *   and passes it on the PX4
  * Action server to call the PX4 TakeOff command
  * Action server to call the PX4 Land command
  * Simple server to ARM the drone
@@ -40,6 +38,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
+#include "tf2_ros/buffer.h"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2_ros/transform_broadcaster.h"
 
@@ -49,7 +48,6 @@
 #include <mavsdk/plugins/action/action.h>
 #include <mavsdk/plugins/offboard/offboard.h>
 #include <mavsdk/plugins/telemetry/telemetry.h>
-#include <mavsdk/plugins/mavlink_passthrough/mavlink_passthrough.h>
 
 // From drone_interfaces
 #include "drone_interfaces/action/takeoff.hpp"
@@ -86,16 +84,13 @@ public:
   {
     // Declare parameters
     this->declare_parameter<std::string>("connection_url", "udp://:14540");
-    this->declare_parameter<std::string>("height_topic", "vl53l1x/range");
-    this->declare_parameter<float>("height_sensor_z_offset", 0.153);
-    this->declare_parameter<bool>("use_height_sensor", false);
     
     connection_result_ = ConnectionResult::SystemNotConnected;
     
     // Give the rest of the robot time to start up before we connect to the sharp end.
     // This timer will try every five seconds to connect, until a connetion has been established.
     using namespace std::chrono_literals;
-    one_off_timer_ = this->create_wall_timer(5000ms, std::bind(&DroneNode::init, this)); 
+    one_off_timer_ = this->create_wall_timer(3000ms, std::bind(&DroneNode::init, this)); 
   }
 
   private:
@@ -107,12 +102,8 @@ public:
   std::shared_ptr<mavsdk::Action> _action;
   std::shared_ptr<mavsdk::Telemetry> _telemetry;
   std::shared_ptr<mavsdk::Offboard> _offboard;
-  std::shared_ptr<mavsdk::MavlinkPassthrough> _passthrough;
   std::shared_ptr<mavsdk::Info> _info; 
-  
-  // Global Variables
-  float height_sensor_z_offset_;
-  
+    
   // General Timers
   rclcpp::TimerBase::SharedPtr one_off_timer_;
   
@@ -124,10 +115,7 @@ public:
   // Subscriptions
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr subscription_;
   void cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPtr msg) const;
-  
-  rclcpp::Subscription<sensor_msgs::msg::Range>::SharedPtr height_subscription_;
-  void height_callback(const sensor_msgs::msg::Range::SharedPtr msg) const;
-  
+    
   // TF2 Boradcaster
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
@@ -181,7 +169,8 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
     }
   
   }
-      
+  
+  // See https://www.ros.org/reps/rep-0103.html      
   // Receive messages in ROS base_link FLU ; X->Foreward, Y->Left Z->Up
   // Send to PX4 in FRD : X->Foreward, Y->Right Z->Down.
   mavsdk::Offboard::VelocityBodyYawspeed px4_vel_frd{};
@@ -191,46 +180,15 @@ void DroneNode::cmd_vel_topic_callback(const geometry_msgs::msg::Twist::SharedPt
       
   // ROS works in radians.  For some odd reason MAVSDK decided to impliment
   // rotation in degress per second.  Convert ROS radians to degrees.
-  px4_vel_frd.yawspeed_deg_s = msg->angular.z*180/M_PI; 
+  // Positive roration in ROS is counter clockwise, MAVSDK take clockwise.
+  px4_vel_frd.yawspeed_deg_s = -(msg->angular.z*180/M_PI); 
       
   _offboard->set_velocity_body(px4_vel_frd);
 
 }
   
-void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) const
-{
-  
-  // Read the system boot time.  (Is this a hack?)
-  std::pair< mavsdk::Info::Result, mavsdk::Info::FlightInfo > information = _info->get_flight_information();
-  
-  // Pass the height to the flight controller to ease landing  
-  mavlink_message_t message;
-  float quaternion = 0.0;
-  mavlink_msg_distance_sensor_pack(
-    _passthrough->get_our_sysid(),                         // ID of this system
-    _passthrough->get_our_compid(),                        // ID of this component (e.g. 200 for IMU)
-    &message,                                              // The MAVLINK message to compress the data into   
-    information.second.time_boot_ms,                       // [ms] Time since system boot
-    msg->min_range * 100,                                  // [cm] Minimum distance sensor can measure.  ROS message is in Meters!      
-    msg->max_range * 100,                                  // [cm] Maximum distance sensor can measure.  ROS message is in Meters!
-    (msg->range - height_sensor_z_offset_) * 100,          // [cm] Current distance reading.  ROS message is in Meters!
-    MAV_DISTANCE_SENSOR::MAV_DISTANCE_SENSOR_INFRARED,     // Type of distance sensor. This is not aligned with msg->radiation_type,
-    0,                                                     // Onboard ID of sensor     
-    MAV_SENSOR_ORIENTATION::MAV_SENSOR_ROTATION_PITCH_270, // Direction the sensor faces
-    255,                                                   // [cm^2] Measurement Variance.  Mx Standard Deviation is 6cm, UINT8_MAX is unknown 
-    msg->field_of_view,                                    // [rad] Horizontal field of view
-    msg->field_of_view,                                    // [rad] Vertical field of view
-    &quaternion,                                           // This field is required if orientation is set to MAV_SENSOR_ROTATION_CUSTOM.  Set to 0 if invalid)
-    0                                                      // Signal quality.  0 = unknown. 1 = invalid signal, 100 = perfect signal
-  ); 
-  
-  _passthrough->send_message(message);
-  
-  
-}
-
 // Action Servers /////////////////////////////////////////////////////////////////
-// Takeoff Action Server - Start
+// /////////////////////////////////////////// Takeoff Action Server START /////////////////////////////////////////
 // The general strategy here is to use the PX4 Action Plugin to Takeoff. The drone will be armed if it is not already so.
 
   rclcpp_action::GoalResponse DroneNode::takeoff_handle_goal(
@@ -298,7 +256,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
     }
       
     // Set up callback to monitor altitude while the vehicle is in flight
-    _telemetry->subscribe_position([&](Telemetry::Position position) {    
+    auto handle = _telemetry->subscribe_position([&](Telemetry::Position position) {    
       current_altitude = (float)position.relative_altitude_m;      
       // Publish feedback      
       goal_handle->publish_feedback(feedback);
@@ -312,36 +270,40 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
         result->result = false;
         RCLCPP_ERROR(this->get_logger(), "Arm failed.");
         goal_handle->succeed(result);
-        _telemetry->subscribe_position(nullptr);
+        _telemetry->unsubscribe_position(handle);
         return; 
       }
     }
 
     const Action::Result takeoff_result = _action->takeoff();
     if (takeoff_result != Action::Result::Success) {
-        result->result = false;
-        RCLCPP_ERROR(this->get_logger(), "Take off failed.");
-        goal_handle->succeed(result);
-        _telemetry->subscribe_position(nullptr);
-        return;  
+      RCLCPP_ERROR(this->get_logger(), "Take off failed.");
+      result->result = false;
+      goal_handle->succeed(result);
+      _telemetry->unsubscribe_position(handle);
+      return;  
     }
     
-    while ( (goal->target_altitude- feedback->current_altitude) > 0.1 ) {
-      if (goal_handle->is_canceling()) {   // What if the mode has changed??
-        result->result = false;
-        goal_handle->canceled(result);
-        RCLCPP_INFO(this->get_logger(), "Takeoff goal cancelled");
-        _telemetry->subscribe_position(nullptr);
-        return;
-      }
-
-      // Publish feedback      
-      goal_handle->publish_feedback(feedback);
-
-      loop_rate.sleep();
+    auto in_air_promise = std::promise<void>{};
+    auto in_air_future = in_air_promise.get_future();
+    Telemetry::LandedStateHandle stateHandle = _telemetry->subscribe_landed_state(
+      [&in_air_promise, &stateHandle, this](Telemetry::LandedState state) {
+        if (state == Telemetry::LandedState::InAir) {
+          RCLCPP_INFO(this->get_logger(), "Taking off has finished");
+          this->_telemetry->unsubscribe_landed_state(stateHandle);
+          in_air_promise.set_value();
+        }
+      });
+    in_air_future.wait_for(std::chrono::seconds(10));
+    if (in_air_future.wait_for(std::chrono::seconds(3)) == std::future_status::timeout) {
+      RCLCPP_ERROR(this->get_logger(), "Takeoff fimed out");
+      _telemetry->unsubscribe_position(handle);
+      result->result = false;
+      goal_handle->succeed(result);
+      return;
     }
-
-    _telemetry->subscribe_position(nullptr);
+    
+    _telemetry->unsubscribe_position(handle);
 
     // Check if goal is done
     if (rclcpp::ok()) {
@@ -355,8 +317,9 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
     }
   }
 
-// Takeoff Action Server End
-// Land Action Server Start
+// /////////////////////////////////////////// Takeoff Action Server END /////////////////////////////////////////
+
+// /////////////////////////////////////////// Land Action Server START //////////////////////////////////////////  
 // The general strategy here is to use the PX4 Action Plugin to Land at the current location. The flight controller 
 // will disarm the drone after landing.
 
@@ -414,11 +377,10 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
     }
       
     // Set up callback to monitor altitude while the vehicle is in flight
-    _telemetry->subscribe_position([&](Telemetry::Position position) {    
+    auto telemetry_handle = _telemetry->subscribe_position([&](Telemetry::Position position) {    
       current_altitude = (float)position.relative_altitude_m;      
       // Publish feedback      
       goal_handle->publish_feedback(feedback);
-      RCLCPP_DEBUG(this->get_logger(), "Current Altitude: %f", position.relative_altitude_m);
     });
 
     const Action::Result land_result = _action->land();
@@ -426,7 +388,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
       RCLCPP_ERROR(this->get_logger(), "Landing failed!  Put your helmet on!");
       result->result = false;
       goal_handle->canceled(result);
-      _telemetry->subscribe_position(nullptr);
+      _telemetry->unsubscribe_position(telemetry_handle);
 
       return;
 
@@ -439,7 +401,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
         result->result = false;
         goal_handle->canceled(result);
         RCLCPP_INFO(this->get_logger(), "Landing goal cancelled");
-        _telemetry->subscribe_position(nullptr);
+        _telemetry->unsubscribe_position(telemetry_handle);
 
         return;
       }
@@ -450,8 +412,7 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
       loop_rate.sleep();
     }
     
-    _telemetry->subscribe_position(nullptr);
-    RCLCPP_INFO(this->get_logger(), "Landed!");
+    _telemetry->unsubscribe_position(telemetry_handle);
 
     // We are relying on auto-disarming but let's keep watching the telemetry for a bit longer.
     rclcpp::sleep_for(std::chrono::seconds(3));
@@ -460,13 +421,13 @@ void DroneNode::height_callback(const sensor_msgs::msg::Range::SharedPtr msg) co
     if (rclcpp::ok()) {
       result->result = true;
       goal_handle->succeed(result);
-      RCLCPP_INFO(this->get_logger(), "Goal succeeded");
+      RCLCPP_INFO(this->get_logger(), "Landed!");
     }  
   }
 
-// Land Action Server End
+// /////////////////////////////////////////// Land Action Server END /////////////////////////////////////////
 
-// Simple Services /////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////// Simple Services /////////////////////////////////////////////
 
 void DroneNode::arm(const std::shared_ptr<drone_interfaces::srv::Arm::Request> request,
                std::shared_ptr<drone_interfaces::srv::Arm::Response> response) {
@@ -547,7 +508,7 @@ void DroneNode::init()
   // Uniform Initialization
   _action = std::make_shared<mavsdk::Action>(target_system);
   _offboard = std::make_shared<mavsdk::Offboard>(target_system);
-  _passthrough = std::make_shared<mavsdk::MavlinkPassthrough>(target_system);
+//  _passthrough = std::make_shared<mavsdk::MavlinkPassthrough>(target_system);
   _info = std::make_shared<mavsdk::Info>(target_system);
   _telemetry = std::make_shared<mavsdk::Telemetry>(target_system);
 
@@ -584,17 +545,6 @@ void DroneNode::init()
   // Subscribers
   subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
     "drone/cmd_vel", 20, std::bind(&DroneNode::cmd_vel_topic_callback, this, _1));
-
-  std::string height_topic;
-  bool subscribe_height;
-  this->get_parameter<std::string>("height_topic", height_topic);
-  this->get_parameter<float>("height_sensor_z_offset", height_sensor_z_offset_);  
-  this->get_parameter<bool>("use_height_sensor", subscribe_height);
-  
-  if(subscribe_height) {
-    height_subscription_ = this->create_subscription<sensor_msgs::msg::Range>(
-      height_topic, 5, std::bind(&DroneNode::height_callback, this, _1));
-  }
   
   // Publishers
   odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("drone/odom", 50);
@@ -612,11 +562,12 @@ void DroneNode::init()
         [this](mavsdk::Telemetry::Odometry odometry) { 
                  
       rclcpp::Time now = this->get_clock()->now();
-          
+                
       geometry_msgs::msg::TransformStamped t;
 
       // Read message content and assign it to
       // corresponding tf variables
+      //  Describe the difference between the odometry and the base in the FRD frame.  This is 1:1 simple    
       t.header.stamp = now;
       t.header.frame_id = "odom_ned";
       t.child_frame_id = "base_link_frd";
@@ -631,66 +582,100 @@ void DroneNode::init()
       t.transform.rotation.z = odometry.q.z;
       t.transform.rotation.w = odometry.q.w;
       tf_broadcaster_->sendTransform(t);    
-          
-          
+    
       // Read message content and assign it to
       // corresponding tf variables
+      //  Describe the difference between the odometry and the base in the ENU frame.  
+      //  This one is slightly more complex.  We need to use odometry in NED to 
+      //  describe FLU.     
       t.header.stamp = now;
       t.header.frame_id = "odom";
       t.child_frame_id = "base_link";
       
       // swap x and y and negate z    
-      t.transform.translation.x = odometry.position_body.y_m;
-      t.transform.translation.y = odometry.position_body.x_m;
-      t.transform.translation.z = -odometry.position_body.z_m; 
-         
+      t.transform.translation.x = odometry.position_body.y_m;   // East
+      t.transform.translation.y = odometry.position_body.x_m;   // North 
+      t.transform.translation.z = -odometry.position_body.z_m;  // Up = -Down
+      
+      /* Lift the roll - pitch - yaw from the odometry received
+        MAVSDK - 
+          Roll angle in degrees, positive is banking to the right.
+          Pitch angle in degrees, positive is pitching nose up.
+          Yaw angle in degrees, positive is clock-wise seen from above.
+          
+        ROS REP 103
+          By the right hand rule, the yaw component of orientation increases as the child 
+          frame rotates counter-clockwise, and for geographic poses, yaw is zero when pointing east.
+
+          This requires special mention only because it differs from a traditional compass bearing, 
+          which is zero when pointing north and increments clockwise. Hardware drivers should make 
+          the appropriate transformations before publishing standard ROS messages.
+          
+        RESPONSE
+          Negate the yaw, and then add 90 degrees (1.57 radians)
+      */   
+      tf2::Quaternion q(
+        odometry.q.x,
+        odometry.q.y,
+        odometry.q.z,
+        odometry.q.w);
+      tf2::Matrix3x3 m(q);
+      double roll, pitch, yaw;
+      m.getRPY(roll, pitch, yaw);    
+      
+      // Impliment respose    
+      q.setRPY(roll, pitch, std::fmod((2*M_PI - yaw + 1.57) , 2*M_PI) );     
+                    
       // Adopt the roll pitch and yaw from the drone.
-      t.transform.rotation.x = odometry.q.x;
-      t.transform.rotation.y = odometry.q.y;
-      t.transform.rotation.z = odometry.q.z;
-      t.transform.rotation.w = odometry.q.w;
+      t.transform.rotation.x = q.x();
+      t.transform.rotation.y = q.y();
+      t.transform.rotation.z = q.z();
+      t.transform.rotation.w = q.w();
       tf_broadcaster_->sendTransform(t);    
                               
       // Publish odometry    
       auto message = nav_msgs::msg::Odometry();
 
-      //RCLCPP_INFO(this->get_logger(), "Velocity Frame = %d, Pose Frame = %d", odometry.child_frame_id, odometry.frame_id);
-          
+      // Now publish some odometry   
       message.header.stamp = now;
-      message.header.frame_id ="odom_ned";
+      message.header.frame_id ="odom";
 
-      message.pose.pose.position.x = odometry.position_body.x_m;
-      message.pose.pose.position.y = odometry.position_body.y_m;
-      message.pose.pose.position.z = odometry.position_body.z_m;
+      message.pose.pose.position.x = odometry.position_body.y_m;
+      message.pose.pose.position.y = odometry.position_body.x_m;
+      message.pose.pose.position.z = -odometry.position_body.z_m;
       
-      message.pose.pose.orientation.x = odometry.q.x;
-      message.pose.pose.orientation.y = odometry.q.y;
-      message.pose.pose.orientation.z = odometry.q.z;
-      message.pose.pose.orientation.w = odometry.q.w; 
-        
+      message.pose.pose.orientation.x = q.x();
+      message.pose.pose.orientation.y = q.y();
+      message.pose.pose.orientation.z = q.z();
+      message.pose.pose.orientation.w = q.w(); 
+      
+      /*    
       message.pose.covariance[0] = odometry.pose_covariance.covariance_matrix[0];
       message.pose.covariance[7] = odometry.pose_covariance.covariance_matrix[6];
       message.pose.covariance[14] = odometry.pose_covariance.covariance_matrix[11];      
       message.pose.covariance[21] = odometry.pose_covariance.covariance_matrix[15];
       message.pose.covariance[28] = odometry.pose_covariance.covariance_matrix[18];
       message.pose.covariance[35] = odometry.pose_covariance.covariance_matrix[20];
-      
-      message.child_frame_id ="base_link_frd";
+      */
+      // Translate FRD to FLU    
+      message.child_frame_id ="base_link";
       message.twist.twist.linear.x = odometry.velocity_body.x_m_s;
-      message.twist.twist.linear.y = odometry.velocity_body.y_m_s;
-      message.twist.twist.linear.z = odometry.velocity_body.z_m_s;
+      message.twist.twist.linear.y = -odometry.velocity_body.y_m_s;
+      message.twist.twist.linear.z = -odometry.velocity_body.z_m_s;
             
       message.twist.twist.angular.x = odometry.angular_velocity_body.roll_rad_s;
       message.twist.twist.angular.y = odometry.angular_velocity_body.pitch_rad_s;
-      message.twist.twist.angular.z = odometry.angular_velocity_body.yaw_rad_s;
+      message.twist.twist.angular.z = -odometry.angular_velocity_body.yaw_rad_s;
 
+      /*    
       message.twist.covariance[0] = odometry.velocity_covariance.covariance_matrix[0];
       message.twist.covariance[7] = odometry.velocity_covariance.covariance_matrix[6];
       message.twist.covariance[14] = odometry.velocity_covariance.covariance_matrix[11];      
       message.twist.covariance[21] = odometry.velocity_covariance.covariance_matrix[15];
       message.twist.covariance[28] = odometry.velocity_covariance.covariance_matrix[18];
       message.twist.covariance[35] = odometry.velocity_covariance.covariance_matrix[20];
-      
+      */
+          
       odom_publisher_->publish(message); 
         
    });  
@@ -724,9 +709,6 @@ void DroneNode::init()
   
   // Subscribe and publish gps messages
   _telemetry->subscribe_position([this](Telemetry::Position position) {
-      // std::cout << "Vehicle is at: " << position.latitude_deg << ", " << position.longitude_deg
-      //            << " degrees\n";
-    
     // Publish the gps position as drone/gps_position of type sensor_msgs/mag/NavSatFix
     rclcpp::Time now = this->get_clock()->now();
     
@@ -755,16 +737,16 @@ std::shared_ptr<mavsdk::System> DroneNode::get_system(Mavsdk& mavsdk)
 
   // We wait for new systems to be discovered, once we find one that has an
   // autopilot, we decide to use it.
-  mavsdk.subscribe_on_new_system([&mavsdk, &prom, this]() {
+  Mavsdk::NewSystemHandle handle = mavsdk.subscribe_on_new_system([&mavsdk, &prom, &handle, this]() {
     auto system = mavsdk.systems().back();
 
     if (system->has_autopilot()) {
       RCLCPP_INFO(this->get_logger(), "Discovered autopilot");
-      
-      // Unsubscribe again as we only want to find one system.
-      mavsdk.subscribe_on_new_system(nullptr);
-      prom.set_value(system);
-    }
+
+        // Unsubscribe again as we only want to find one system.
+        mavsdk.unsubscribe_on_new_system(handle);
+        prom.set_value(system);
+      }
   });
 
   // We usually receive heartbeats at 1Hz, therefore we should find a
@@ -778,7 +760,6 @@ std::shared_ptr<mavsdk::System> DroneNode::get_system(Mavsdk& mavsdk)
   return fut.get();
 }
   
-
 }  // namespace drone_node
 
 RCLCPP_COMPONENTS_REGISTER_NODE(drone_node::DroneNode)
