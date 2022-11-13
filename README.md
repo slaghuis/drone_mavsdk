@@ -15,7 +15,6 @@ xxx@simulator:~/ros_ws$ ros2 node info /drone_node
 /drone_node
   Subscribers:
     /drone/cmd_vel: geometry_msgs/msg/Twist
-    /vl53l1x/range: sensor_msgs/msg/Range
   Publishers:
     /drone/battery: sensor_msgs/msg/BatteryState
     /drone/gps: sensor_msgs/msg/NavSatFix
